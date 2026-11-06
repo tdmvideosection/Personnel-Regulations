@@ -326,18 +326,29 @@ const store = {
     localStorage.setItem('hrq_correct', correct);
     localStorage.setItem('hrq_wrong', JSON.stringify([...wrong]));
   },
-  clear(){ localStorage.removeItem('hrq_asked'); localStorage.removeItem('hrq_correct'); localStorage.removeItem('hrq_wrong'); }
+  get round(){ try { return JSON.parse(localStorage.getItem('hrq_round') || 'null') } catch(e){ return null } },
+  saveRound(r){ localStorage.setItem('hrq_round', JSON.stringify(r)); },
+  clear(){ ['hrq_asked','hrq_correct','hrq_wrong','hrq_round'].forEach(k => localStorage.removeItem(k)); }
 };
 let wrongPool = store.wrong;
 let qIndex = -1, optOrder = [], answered = false, quizCount = 0;
 
+// ---- round system: all questions form one round; no repeat until the round is complete ----
+let round = store.round;
+function startNewRound(){
+  round = { order: shuffle(QUESTIONS.map((_, i) => i)), pos: 0 };
+  store.saveRound(round);
+}
+if (!round || !Array.isArray(round.order) || round.order.length !== QUESTIONS.length ||
+    typeof round.pos !== 'number' || round.pos < 0 || round.pos > round.order.length) startNewRound();
+
 function statsText(){
-  let base = '題庫共 ' + QUESTIONS.length + ' 題 · 隨機抽題 · 無限練習';
+  let base = '題庫共 ' + QUESTIONS.length + ' 題 · 每輪抽齊不重覆 · 無限練習';
   const a = store.asked;
   if (a > 0) {
     base += '\n我的記錄：已答 ' + a + ' 題 · 答對 ' + store.correct + ' 題 · 正確率 ' +
             Math.round(100 * store.correct / a) + '%' +
-            (wrongPool.size ? ' · 錯題 ' + wrongPool.size + ' 題會優先重溫' : '');
+            (wrongPool.size ? ' · 錯題 ' + wrongPool.size + ' 題' : '');
   }
   return base;
 }
@@ -347,7 +358,7 @@ function renderHomeStats(){
   if (store.asked > 0) {
     const b = document.createElement('button');
     b.textContent = '清除練習記錄';
-    b.onclick = () => { store.clear(); wrongPool = new Set(); renderHomeStats(); };
+    b.onclick = () => { store.clear(); wrongPool = new Set(); startNewRound(); renderHomeStats(); };
     el.appendChild(document.createElement('br'));
     el.appendChild(b);
   }
@@ -439,26 +450,19 @@ function shuffle(arr){
 }
 function updateMeta(){
   const a = store.asked, pct = a ? Math.round(100 * store.correct / a) : 0;
-  $('quizMeta').textContent = '已答 ' + a + ' · 答對 ' + store.correct + ' · ' + pct + '%';
+  $('quizMeta').textContent = '本輪 ' + Math.min(round.pos, QUESTIONS.length) + '/' + QUESTIONS.length +
+    ' · 已答 ' + a + ' · 答對 ' + store.correct + ' · ' + pct + '%';
 }
 function nextQuestion(){
   answered = false;
   quizCount++;
-  let pick;
-  if (wrongPool.size && Math.random() < 0.25) {
-    const wp = [...wrongPool];
-    pick = wp[Math.floor(Math.random() * wp.length)];
-    if (pick === qIndex && wp.length > 1) pick = wp[(wp.indexOf(pick) + 1) % wp.length];
-  } else {
-    pick = Math.floor(Math.random() * QUESTIONS.length);
-    if (pick === qIndex && QUESTIONS.length > 1)
-      pick = (pick + 1 + Math.floor(Math.random() * (QUESTIONS.length - 1))) % QUESTIONS.length;
-  }
-  qIndex = pick;
+  if (round.pos >= round.order.length) startNewRound(); // round complete -> reshuffle all
+  qIndex = round.order[round.pos++];
+  store.saveRound(round);
   const q = QUESTIONS[qIndex];
   optOrder = shuffle(q.opts.map((_, i) => i));
 
-  $('qNum').textContent = '第 ' + quizCount + ' 題';
+  $('qNum').textContent = '本輪第 ' + round.pos + ' / ' + QUESTIONS.length + ' 題';
   $('qText').textContent = q.q;
   const box = $('opts');
   box.innerHTML = '';
